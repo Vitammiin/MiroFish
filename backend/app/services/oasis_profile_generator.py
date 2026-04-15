@@ -950,9 +950,9 @@ class OasisProfileGenerator:
                 )
                 return idx, fallback_profile, str(e)
         
-        logger.info(f"开始并行生成 {total} 个Agent人设（并行数: {parallel_count}）...")
+        logger.info(f"Starting parallel generation of {total} agent profiles (parallelism: {parallel_count})...")
         print(f"\n{'='*60}")
-        print(f"开始生成Agent人设 - 共 {total} 个实体，并行数: {parallel_count}")
+        print(f"Generating agent profiles - {total} entities, parallelism: {parallel_count}")
         print(f"{'='*60}\n")
         
         # 使用线程池并行执行
@@ -1008,7 +1008,7 @@ class OasisProfileGenerator:
                     save_profiles_realtime()
         
         print(f"\n{'='*60}")
-        print(f"人设生成完成！共生成 {len([p for p in profiles if p])} 个Agent")
+        print(f"Profile generation complete! Generated {len([p for p in profiles if p])} agents")
         print(f"{'='*60}\n")
         
         return profiles
