@@ -7,6 +7,7 @@ Zep 的 node/edge 列表接口使用 UUID cursor 分页，
 from __future__ import annotations
 
 import time
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -14,6 +15,7 @@ from zep_cloud import InternalServerError
 from zep_cloud.client import Zep
 
 from .logger import get_logger
+from .zep_errors import is_zep_rate_limit_error, extract_retry_after_seconds
 
 logger = get_logger('mirofish.zep_paging')
 
@@ -41,14 +43,21 @@ def _fetch_page_with_retry(
     for attempt in range(max_retries):
         try:
             return api_call(*args, **kwargs)
-        except (ConnectionError, TimeoutError, OSError, InternalServerError) as e:
+        except Exception as e:
+            is_transient_error = isinstance(e, (ConnectionError, TimeoutError, OSError, InternalServerError, json.JSONDecodeError))
+            is_rate_limit = is_zep_rate_limit_error(e)
+            if not is_transient_error and not is_rate_limit:
+                raise
+
             last_exception = e
             if attempt < max_retries - 1:
+                effective_delay = extract_retry_after_seconds(e) if is_rate_limit else None
+                effective_delay = float(effective_delay) if effective_delay else delay
                 logger.warning(
-                    f"Zep {page_description} attempt {attempt + 1} failed: {str(e)[:100]}, retrying in {delay:.1f}s..."
+                    f"Zep {page_description} attempt {attempt + 1} failed: {str(e)[:100]}, retrying in {effective_delay:.1f}s..."
                 )
-                time.sleep(delay)
-                delay *= 2
+                time.sleep(effective_delay)
+                delay = max(delay * 2, effective_delay)
             else:
                 logger.error(f"Zep {page_description} failed after {max_retries} attempts: {str(e)}")
 

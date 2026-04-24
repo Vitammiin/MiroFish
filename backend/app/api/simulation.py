@@ -214,7 +214,7 @@ def create_simulation():
                 "success": False,
                 "error": t('api.graphNotBuilt')
             }), 400
-        
+
         manager = SimulationManager()
         state = manager.create_simulation(
             project_id=project_id,
@@ -225,7 +225,11 @@ def create_simulation():
         
         return jsonify({
             "success": True,
-            "data": state.to_dict()
+            "data": {
+                **state.to_dict(),
+                "graph_source": project.graph_source,
+                "graph_warning": project.graph_warning,
+            }
         })
         
     except Exception as e:
@@ -716,6 +720,21 @@ def get_prepare_status():
         if not task:
             # 任务不存在，但如果有simulation_id，检查是否已准备完成
             if simulation_id:
+                manager = SimulationManager()
+                state = manager.get_simulation(simulation_id)
+                if state and state.status == SimulationStatus.PREPARING:
+                    return jsonify({
+                        "success": True,
+                        "data": {
+                            "simulation_id": simulation_id,
+                            "task_id": task_id,
+                            "status": "processing",
+                            "progress": 5,
+                            "message": t('api.prepareStarted'),
+                            "already_prepared": False
+                        }
+                    })
+
                 is_prepared, prepare_info = _check_simulation_prepared(simulation_id)
                 if is_prepared:
                     return jsonify({
@@ -775,6 +794,13 @@ def get_simulation(simulation_id: str):
             "success": True,
             "data": result
         })
+        
+    except ValueError as e:
+        logger.error(f"获取模拟状态失败: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 409
         
     except Exception as e:
         logger.error(f"获取模拟状态失败: {str(e)}")

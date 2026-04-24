@@ -94,6 +94,7 @@
     "inProgress": "In Progress",
     "creating": "Creating...",
     "enterEnvSetup": "Enter Environment Setup",
+    "retryZepGraphBuild": "Retry Zep Graph Build",
     "createSimulationFailed": "Failed to create simulation: {error}",
     "createSimulationException": "Simulation creation error: {error}"
   },
@@ -563,6 +564,7 @@
     "getReportInfoFailed": "Failed to get report info: {error}",
     "enterStep": "Entering Step {step}: {name}",
     "returnToStep": "Returning to Step {step}: {name}",
+    "retryGraphBuild": "Retrying graph build through Zep...",
     "customSimRounds": "Custom simulation rounds: {rounds} rounds"
   },
   "report": {

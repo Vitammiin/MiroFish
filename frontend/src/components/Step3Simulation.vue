@@ -395,11 +395,12 @@ const doStartSimulation = async () => {
   emit('update-status', 'processing')
   
   try {
+    const graphMemoryUpdateEnabled = props.projectData?.graph_source !== 'local_preview'
     const params = {
       simulation_id: props.simulationId,
       platform: 'parallel',
       force: true,  // 强制重新开始
-      enable_graph_memory_update: true  // 开启动态图谱更新
+      enable_graph_memory_update: graphMemoryUpdateEnabled
     }
     
     if (props.maxRounds) {
@@ -407,7 +408,11 @@ const doStartSimulation = async () => {
       addLog(t('log.setMaxRounds', { rounds: props.maxRounds }))
     }
     
-    addLog(t('log.graphMemoryUpdateEnabled'))
+    if (graphMemoryUpdateEnabled) {
+      addLog(t('log.graphMemoryUpdateEnabled'))
+    } else {
+      addLog('Graph memory update skipped because this simulation is using a local preview graph.')
+    }
     
     const res = await startSimulation(params)
     

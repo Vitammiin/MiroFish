@@ -43,6 +43,8 @@ class Project:
     # 图谱信息（接口2完成后填充）
     graph_id: Optional[str] = None
     graph_build_task_id: Optional[str] = None
+    graph_source: Optional[str] = None
+    graph_warning: Optional[str] = None
     
     # 配置
     simulation_requirement: Optional[str] = None
@@ -66,6 +68,8 @@ class Project:
             "analysis_summary": self.analysis_summary,
             "graph_id": self.graph_id,
             "graph_build_task_id": self.graph_build_task_id,
+            "graph_source": self.graph_source,
+            "graph_warning": self.graph_warning,
             "simulation_requirement": self.simulation_requirement,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
@@ -91,6 +95,8 @@ class Project:
             analysis_summary=data.get('analysis_summary'),
             graph_id=data.get('graph_id'),
             graph_build_task_id=data.get('graph_build_task_id'),
+            graph_source=data.get('graph_source'),
+            graph_warning=data.get('graph_warning'),
             simulation_requirement=data.get('simulation_requirement'),
             chunk_size=data.get('chunk_size', 500),
             chunk_overlap=data.get('chunk_overlap', 50),
@@ -128,6 +134,11 @@ class ProjectManager:
     def _get_project_text_path(cls, project_id: str) -> str:
         """获取项目提取文本存储路径"""
         return os.path.join(cls._get_project_dir(project_id), 'extracted_text.txt')
+
+    @classmethod
+    def _get_project_graph_cache_path(cls, project_id: str) -> str:
+        """获取项目图谱快照缓存路径"""
+        return os.path.join(cls._get_project_dir(project_id), 'graph_snapshot.json')
     
     @classmethod
     def create_project(cls, name: str = "Unnamed Project") -> Project:
@@ -303,3 +314,38 @@ class ProjectManager:
             if os.path.isfile(os.path.join(files_dir, f))
         ]
 
+    @classmethod
+    def save_graph_snapshot(
+        cls,
+        project_id: str,
+        graph_data: Dict[str, Any],
+        meta: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """保存图谱快照，供后续免重复请求或限流兜底使用。"""
+        cache_path = cls._get_project_graph_cache_path(project_id)
+        payload = {
+            "cached_at": datetime.now().isoformat(),
+            "graph_data": graph_data,
+            "meta": meta or {},
+        }
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def get_graph_snapshot(cls, project_id: str) -> Optional[Dict[str, Any]]:
+        """读取项目图谱快照。"""
+        cache_path = cls._get_project_graph_cache_path(project_id)
+        if not os.path.exists(cache_path):
+            return None
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    @classmethod
+    def find_project_by_graph_id(cls, graph_id: str) -> Optional[Project]:
+        """通过 graph_id 反查项目。"""
+        cls._ensure_projects_dir()
+        for project_id in os.listdir(cls.PROJECTS_DIR):
+            project = cls.get_project(project_id)
+            if project and project.graph_id == graph_id:
+                return project
+        return None

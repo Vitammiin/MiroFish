@@ -73,33 +73,121 @@
             </div>
           </div>
 
-          <!-- Generated Entity Tags -->
-          <div v-if="projectData?.ontology?.entity_types" class="tags-container" :class="{ 'dimmed': selectedOntologyItem }">
+          <!-- Generated Entity Types Table -->
+          <div
+            v-if="projectData?.ontology?.entity_types?.length"
+            class="types-table-section"
+            :class="{ 'dimmed': selectedOntologyItem }"
+          >
             <span class="tag-label">GENERATED ENTITY TYPES</span>
-            <div class="tags-list">
-              <span 
-                v-for="entity in projectData.ontology.entity_types" 
-                :key="entity.name" 
-                class="entity-tag clickable"
-                @click="selectOntologyItem(entity, 'entity')"
-              >
-                {{ entity.name }}
-              </span>
+            <div class="types-table-wrapper">
+              <table class="types-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Attributes</th>
+                    <th>Examples</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="entity in projectData.ontology.entity_types"
+                    :key="entity.name"
+                    class="clickable-row"
+                    @click="selectOntologyItem(entity, 'entity')"
+                  >
+                    <td class="name-cell">{{ entity.name }}</td>
+                    <td>{{ entity.description || '—' }}</td>
+                    <td>
+                      <div v-if="entity.attributes?.length" class="cell-stack">
+                        <div
+                          v-for="attr in entity.attributes"
+                          :key="attr.name"
+                          class="cell-item"
+                        >
+                          <span class="mono">{{ attr.name }}</span>
+                          <span class="muted">({{ attr.type || 'text' }})</span>
+                          <span>{{ attr.description || '—' }}</span>
+                        </div>
+                      </div>
+                      <span v-else class="empty-cell">—</span>
+                    </td>
+                    <td>
+                      <div v-if="entity.examples?.length" class="cell-stack">
+                        <div
+                          v-for="example in entity.examples"
+                          :key="example"
+                          class="cell-item"
+                        >
+                          {{ example }}
+                        </div>
+                      </div>
+                      <span v-else class="empty-cell">—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <!-- Generated Relation Tags -->
-          <div v-if="projectData?.ontology?.edge_types" class="tags-container" :class="{ 'dimmed': selectedOntologyItem }">
+          <!-- Generated Relation Types Table -->
+          <div
+            v-if="projectData?.ontology?.edge_types?.length"
+            class="types-table-section"
+            :class="{ 'dimmed': selectedOntologyItem }"
+          >
             <span class="tag-label">GENERATED RELATION TYPES</span>
-            <div class="tags-list">
-              <span 
-                v-for="rel in projectData.ontology.edge_types" 
-                :key="rel.name" 
-                class="entity-tag clickable"
-                @click="selectOntologyItem(rel, 'relation')"
-              >
-                {{ rel.name }}
-              </span>
+            <div class="types-table-wrapper">
+              <table class="types-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Connections</th>
+                    <th>Attributes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="rel in projectData.ontology.edge_types"
+                    :key="rel.name"
+                    class="clickable-row"
+                    @click="selectOntologyItem(rel, 'relation')"
+                  >
+                    <td class="name-cell">{{ rel.name }}</td>
+                    <td>{{ rel.description || '—' }}</td>
+                    <td>
+                      <div v-if="rel.source_targets?.length" class="cell-stack">
+                        <div
+                          v-for="(conn, idx) in rel.source_targets"
+                          :key="`${rel.name}-${idx}`"
+                          class="cell-item"
+                        >
+                          <span class="mono">{{ conn.source }}</span>
+                          <span class="muted">→</span>
+                          <span class="mono">{{ conn.target }}</span>
+                        </div>
+                      </div>
+                      <span v-else class="empty-cell">—</span>
+                    </td>
+                    <td>
+                      <div v-if="rel.attributes?.length" class="cell-stack">
+                        <div
+                          v-for="attr in rel.attributes"
+                          :key="attr.name"
+                          class="cell-item"
+                        >
+                          <span class="mono">{{ attr.name }}</span>
+                          <span class="muted">({{ attr.type || 'text' }})</span>
+                          <span>{{ attr.description || '—' }}</span>
+                        </div>
+                      </div>
+                      <span v-else class="empty-cell">—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -158,14 +246,27 @@
         <div class="card-content">
           <p class="api-note">POST /api/simulation/create</p>
           <p class="description">{{ $t('step1.buildCompleteDesc') }}</p>
-          <button 
-            class="action-btn" 
-            :disabled="currentPhase < 2 || creatingSimulation"
-            @click="handleEnterEnvSetup"
-          >
-            <span v-if="creatingSimulation" class="spinner-sm"></span>
-            {{ creatingSimulation ? $t('step1.creating') : $t('step1.enterEnvSetup') + ' ➝' }}
-          </button>
+          <div v-if="isLocalPreviewOnly" class="preview-warning">
+            {{ localPreviewWarning }}
+          </div>
+          <div class="action-row">
+            <button
+              class="action-btn"
+              :disabled="currentPhase < 2 || creatingSimulation"
+              @click="handleEnterEnvSetup"
+            >
+              <span v-if="creatingSimulation" class="spinner-sm"></span>
+              {{ creatingSimulation ? $t('step1.creating') : $t('step1.enterEnvSetup') + ' ➝' }}
+            </button>
+            <button
+              v-if="isLocalPreviewOnly"
+              class="action-btn action-btn-secondary"
+              :disabled="currentPhase < 2 || creatingSimulation"
+              @click="handleRetryGraphBuild"
+            >
+              {{ $t('step1.retryZepGraphBuild') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -188,11 +289,9 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { createSimulation } from '../api/simulation'
 
-const router = useRouter()
 const { t } = useI18n()
 
 const props = defineProps({
@@ -204,19 +303,25 @@ const props = defineProps({
   systemLogs: { type: Array, default: () => [] }
 })
 
-defineEmits(['next-step'])
+const emit = defineEmits(['next-step', 'retry-build'])
 
 const selectedOntologyItem = ref(null)
 const logContent = ref(null)
 const creatingSimulation = ref(false)
+const isLocalPreviewOnly = computed(() => props.projectData?.graph_source === 'local_preview')
+const localPreviewWarning = computed(
+  () =>
+    props.projectData?.graph_warning ||
+    'Zep quota was exhausted, so the app switched to a local ontology preview. You can continue with snapshot-based setup or retry the Zep graph build.'
+)
 
-// 进入环境搭建 - 创建 simulation 并跳转
+// 进入环境搭建 - 创建 simulation 并交给父层处理跳转
 const handleEnterEnvSetup = async () => {
   if (!props.projectData?.project_id || !props.projectData?.graph_id) {
     console.error('Missing project or graph info')
     return
   }
-  
+
   creatingSimulation.value = true
   
   try {
@@ -228,11 +333,7 @@ const handleEnterEnvSetup = async () => {
     })
     
     if (res.success && res.data?.simulation_id) {
-      // 跳转到 simulation 页面
-      router.push({
-        name: 'Simulation',
-        params: { simulationId: res.data.simulation_id }
-      })
+      emit('next-step', { simulationId: res.data.simulation_id })
     } else {
       console.error('Create simulation failed:', res.error)
       alert(t('step1.createSimulationFailed', { error: res.error || t('common.unknownError') }))
@@ -243,6 +344,10 @@ const handleEnterEnvSetup = async () => {
   } finally {
     creatingSimulation.value = false
   }
+}
+
+const handleRetryGraphBuild = () => {
+  emit('retry-build')
 }
 
 const selectOntologyItem = (item, type) => {
@@ -331,6 +436,17 @@ watch(() => props.systemLogs.length, () => {
   color: #000;
 }
 
+.preview-warning {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #FFD7C9;
+  border-radius: 8px;
+  background: #FFF3EE;
+  color: #8A3B1F;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .step-title {
   font-weight: 600;
   font-size: 14px;
@@ -364,13 +480,13 @@ watch(() => props.systemLogs.length, () => {
   margin-bottom: 16px;
 }
 
-/* Step 01 Tags */
-.tags-container {
+/* Step 01 Type Tables */
+.types-table-section {
   margin-top: 12px;
   transition: opacity 0.3s;
 }
 
-.tags-container.dimmed {
+.types-table-section.dimmed {
     opacity: 0.3;
     pointer-events: none;
 }
@@ -383,30 +499,85 @@ watch(() => props.systemLogs.length, () => {
   font-weight: 600;
 }
 
-.tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.types-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #EAEAEA;
+  border-radius: 6px;
+  background: #FFF;
 }
 
-.entity-tag {
-  background: #F5F5F5;
-  border: 1px solid #EEE;
-  padding: 4px 10px;
-  border-radius: 4px;
+.types-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.types-table th,
+.types-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #F0F0F0;
+  text-align: left;
+  vertical-align: top;
   font-size: 11px;
   color: #333;
+}
+
+.types-table th {
+  background: #FAFAFA;
+  font-size: 10px;
+  font-weight: 700;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.types-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.clickable-row {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.clickable-row:hover {
+  background: #FCFCFC;
+}
+
+.name-cell {
   font-family: 'JetBrains Mono', monospace;
-  transition: all 0.2s;
+  font-weight: 700;
+  color: #111;
 }
 
-.entity-tag.clickable {
-    cursor: pointer;
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.entity-tag.clickable:hover {
-    background: #E0E0E0;
-    border-color: #CCC;
+.cell-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: #F8F8F8;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+.muted {
+  color: #999;
+}
+
+.empty-cell {
+  color: #AAA;
 }
 
 /* Ontology Detail Overlay */
@@ -614,6 +785,12 @@ watch(() => props.systemLogs.length, () => {
   transition: opacity 0.2s;
 }
 
+.action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .action-btn:hover:not(:disabled) {
   opacity: 0.8;
 }
@@ -621,6 +798,10 @@ watch(() => props.systemLogs.length, () => {
 .action-btn:disabled {
   background: #CCC;
   cursor: not-allowed;
+}
+
+.action-btn-secondary {
+  background: #FF5722;
 }
 
 .progress-section {

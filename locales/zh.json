@@ -94,6 +94,7 @@
     "inProgress": "进行中",
     "creating": "创建中...",
     "enterEnvSetup": "进入环境搭建",
+    "retryZepGraphBuild": "重新在 Zep 中构建图谱",
     "createSimulationFailed": "创建模拟失败: {error}",
     "createSimulationException": "创建模拟异常: {error}"
   },
@@ -563,6 +564,7 @@
     "getReportInfoFailed": "获取报告信息失败: {error}",
     "enterStep": "进入 Step {step}: {name}",
     "returnToStep": "返回 Step {step}: {name}",
+    "retryGraphBuild": "正在通过 Zep 重试图谱构建...",
     "customSimRounds": "自定义模拟轮数: {rounds} 轮"
   },
   "report": {

@@ -24,14 +24,14 @@ from app.config import Config
 
 def main():
     """主函数"""
-    # 验证配置
+    # 允许服务在缺少外部密钥时启动，这样前端至少能收到明确的配置错误，
+    # 而不是因为后端未启动而只看到 ERR_CONNECTION_REFUSED。
     errors = Config.validate()
     if errors:
-        print("Configuration error:")
+        print("Configuration warning:")
         for err in errors:
             print(f"  - {err}")
-        print("\nPlease check the .env configuration file")
-        sys.exit(1)
+        print("\nBackend will still start, but related endpoints will return configuration errors.")
     
     # 创建应用
     app = create_app()
@@ -47,4 +47,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

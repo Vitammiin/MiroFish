@@ -13,8 +13,14 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true,
+    open: process.env.MIROFISH_OPEN_BROWSER === '1',
     proxy: {
+      '/api/ai': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/ai/, '/api')
+      },
       '/api': {
         target: 'http://localhost:5001',
         changeOrigin: true,

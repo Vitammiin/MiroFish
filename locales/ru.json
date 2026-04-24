@@ -94,6 +94,7 @@
     "inProgress": "В процессе",
     "creating": "Создание...",
     "enterEnvSetup": "Перейти к настройке среды",
+    "retryZepGraphBuild": "Пересобрать граф в Zep",
     "createSimulationFailed": "Не удалось создать симуляцию: {error}",
     "createSimulationException": "Ошибка создания симуляции: {error}"
   },
@@ -563,6 +564,7 @@
     "getReportInfoFailed": "Не удалось получить информацию об отчёте: {error}",
     "enterStep": "Переход к Шагу {step}: {name}",
     "returnToStep": "Возврат к Шагу {step}: {name}",
+    "retryGraphBuild": "Повторный запуск сборки графа через Zep...",
     "customSimRounds": "Пользовательские раунды симуляции: {rounds} раундов"
   },
   "report": {

@@ -7,6 +7,8 @@ OASIS模拟管理器
 import os
 import json
 import shutil
+import threading
+import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -128,6 +130,7 @@ class SimulationManager:
         os.path.dirname(__file__), 
         '../../uploads/simulations'
     )
+    _state_file_lock = threading.RLock()
     
     def __init__(self):
         # 确保目录存在
@@ -146,11 +149,26 @@ class SimulationManager:
         """保存模拟状态到文件"""
         sim_dir = self._get_simulation_dir(state.simulation_id)
         state_file = os.path.join(sim_dir, "state.json")
+        backup_file = f"{state_file}.bak"
         
         state.updated_at = datetime.now().isoformat()
-        
-        with open(state_file, 'w', encoding='utf-8') as f:
-            json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
+
+        with self.__class__._state_file_lock:
+            state_payload = state.to_dict()
+            temp_file = f"{state_file}.tmp"
+
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(state_payload, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+
+            if os.path.exists(state_file):
+                try:
+                    shutil.copyfile(state_file, backup_file)
+                except Exception as e:
+                    logger.warning(f"备份模拟状态失败: {state.simulation_id}, error={e}")
+
+            os.replace(temp_file, state_file)
         
         self._simulations[state.simulation_id] = state
     
@@ -161,12 +179,36 @@ class SimulationManager:
         
         sim_dir = self._get_simulation_dir(simulation_id)
         state_file = os.path.join(sim_dir, "state.json")
+        backup_file = f"{state_file}.bak"
         
         if not os.path.exists(state_file):
             return None
-        
-        with open(state_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+
+        data = None
+        last_error = None
+
+        with self.__class__._state_file_lock:
+            for candidate in (state_file, backup_file):
+                if not os.path.exists(candidate):
+                    continue
+
+                for _ in range(3):
+                    try:
+                        with open(candidate, 'r', encoding='utf-8') as f:
+                            raw = f.read()
+                        if not raw.strip():
+                            raise ValueError("empty simulation state")
+                        data = json.loads(raw)
+                        break
+                    except (json.JSONDecodeError, ValueError) as e:
+                        last_error = e
+                        time.sleep(0.05)
+
+                if data is not None:
+                    break
+
+        if data is None:
+            raise ValueError(f"模拟状态文件损坏，请重新创建模拟: {simulation_id} ({last_error})")
         
         state = SimulationState(
             simulation_id=simulation_id,

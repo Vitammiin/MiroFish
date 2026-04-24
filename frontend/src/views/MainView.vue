@@ -60,6 +60,7 @@
           :graphData="graphData"
           :systemLogs="systemLogs"
           @next-step="handleNextStep"
+          @retry-build="handleRetryBuild"
         />
         <!-- Step 2: 环境搭建 -->
         <Step2EnvSetup
@@ -84,7 +85,7 @@ import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
-import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
+import { getPendingUpload, clearPendingUpload, restorePendingUpload } from '../store/pendingUpload'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 
 const route = useRoute()
@@ -113,6 +114,8 @@ const systemLogs = ref([])
 // Polling timers
 let pollTimer = null
 let graphPollTimer = null
+let activeBuildTaskId = null
+let recoverBuildTaskPromise = null
 
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
@@ -162,11 +165,19 @@ const toggleMaximize = (target) => {
 }
 
 const handleNextStep = (params = {}) => {
+  if (currentStep.value === 1 && params.simulationId) {
+    addLog(t('log.enterStep', { step: 2, name: stepNames.value[1] }))
+    router.push({
+      name: 'Simulation',
+      params: { simulationId: params.simulationId }
+    })
+    return
+  }
+
   if (currentStep.value < 5) {
     currentStep.value++
     addLog(t('log.enterStep', { step: currentStep.value, name: stepNames.value[currentStep.value - 1] }))
-    
-    // 如果是从 Step 2 进入 Step 3，记录模拟轮数配置
+
     if (currentStep.value === 3 && params.maxRounds) {
       addLog(t('log.customSimRounds', { rounds: params.maxRounds }))
     }
@@ -178,6 +189,14 @@ const handleGoBack = () => {
     currentStep.value--
     addLog(t('log.returnToStep', { step: currentStep.value, name: stepNames.value[currentStep.value - 1] }))
   }
+}
+
+const handleRetryBuild = async () => {
+  if (!currentProjectId.value) return
+  addLog(t('log.retryGraphBuild'))
+  error.value = ''
+  graphData.value = null
+  await startBuildGraph({ force: true })
 }
 
 // --- Data Logic ---
@@ -192,7 +211,11 @@ const initProject = async () => {
 }
 
 const handleNewProject = async () => {
-  const pending = getPendingUpload()
+  let pending = getPendingUpload()
+  if (!pending.isPending || pending.files.length === 0) {
+    pending = await restorePendingUpload()
+  }
+
   if (!pending.isPending || pending.files.length === 0) {
     error.value = 'No pending files found.'
     addLog('Error: No pending files found for new project.')
@@ -211,7 +234,7 @@ const handleNewProject = async () => {
     
     const res = await generateOntology(formData)
     if (res.success) {
-      clearPendingUpload()
+      await clearPendingUpload()
       currentProjectId.value = res.data.project_id
       projectData.value = res.data
       
@@ -238,15 +261,18 @@ const loadProject = async () => {
     const res = await getProject(currentProjectId.value)
     if (res.success) {
       projectData.value = res.data
+      error.value = ''
       updatePhaseByStatus(res.data.status)
       addLog(`Project loaded. Status: ${res.data.status}`)
+      if (res.data.graph_source === 'local_preview' && res.data.graph_warning) {
+        addLog(`Warning: ${res.data.graph_warning}`)
+      }
       
       if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
         await startBuildGraph()
       } else if (res.data.status === 'graph_building' && res.data.graph_build_task_id) {
         currentPhase.value = 1
         startPollingTask(res.data.graph_build_task_id)
-        startGraphPolling()
       } else if (res.data.status === 'graph_completed' && res.data.graph_id) {
         currentPhase.value = 2
         await loadGraph(res.data.graph_id)
@@ -266,23 +292,34 @@ const loadProject = async () => {
 const updatePhaseByStatus = (status) => {
   switch (status) {
     case 'created':
-    case 'ontology_generated': currentPhase.value = 0; break;
-    case 'graph_building': currentPhase.value = 1; break;
-    case 'graph_completed': currentPhase.value = 2; break;
+    case 'ontology_generated':
+      error.value = ''
+      currentPhase.value = 0
+      break
+    case 'graph_building':
+      error.value = ''
+      currentPhase.value = 1
+      break
+    case 'graph_completed':
+      error.value = ''
+      currentPhase.value = 2
+      break
     case 'failed': error.value = 'Project failed'; break;
   }
 }
 
-const startBuildGraph = async () => {
+const startBuildGraph = async (options = {}) => {
   try {
     currentPhase.value = 1
     buildProgress.value = { progress: 0, message: 'Starting build...' }
-    addLog('Initiating graph build...')
+    addLog(options.force ? 'Retrying graph build with force...' : 'Initiating graph build...')
     
-    const res = await buildGraph({ project_id: currentProjectId.value })
+    const res = await buildGraph({
+      project_id: currentProjectId.value,
+      ...(options.force ? { force: true } : {})
+    })
     if (res.success) {
       addLog(`Graph build task started. Task ID: ${res.data.task_id}`)
-      startGraphPolling()
       startPollingTask(res.data.task_id)
     } else {
       error.value = res.error
@@ -295,9 +332,55 @@ const startBuildGraph = async () => {
 }
 
 const startGraphPolling = () => {
-  addLog('Started polling for graph data...')
-  fetchGraphData()
-  graphPollTimer = setInterval(fetchGraphData, 10000)
+  addLog('Graph data polling disabled to avoid Zep FREE plan rate limits during build.')
+}
+
+const recoverBuildTask = async (staleTaskId) => {
+  if (recoverBuildTaskPromise) return recoverBuildTaskPromise
+
+  recoverBuildTaskPromise = (async () => {
+    try {
+      const res = await getProject(currentProjectId.value)
+      if (!res.success) return
+
+      projectData.value = res.data
+      updatePhaseByStatus(res.data.status)
+
+      if (res.data.status === 'graph_building' && res.data.graph_build_task_id && res.data.graph_build_task_id !== staleTaskId) {
+        addLog(`Recovered graph build task after restart: ${res.data.graph_build_task_id}`)
+        error.value = null
+        buildProgress.value = buildProgress.value || {
+          progress: 1,
+          message: 'Restoring graph build after backend restart...'
+        }
+        startPollingTask(res.data.graph_build_task_id)
+        return
+      }
+
+      if (res.data.status === 'graph_completed' && res.data.graph_id) {
+        stopPolling()
+        stopGraphPolling()
+        currentPhase.value = 2
+        buildProgress.value = null
+        await loadGraph(res.data.graph_id)
+        return
+      }
+
+      if (res.data.status === 'failed') {
+        stopPolling()
+        stopGraphPolling()
+        buildProgress.value = null
+        error.value = res.data.error || 'Project failed during recovery'
+        addLog(`Graph build recovery failed: ${error.value}`)
+      }
+    } catch (err) {
+      console.error('Recover task error:', err)
+    } finally {
+      recoverBuildTaskPromise = null
+    }
+  })()
+
+  return recoverBuildTaskPromise
 }
 
 const fetchGraphData = async () => {
@@ -311,6 +394,9 @@ const fetchGraphData = async () => {
         const nodeCount = gRes.data.node_count || gRes.data.nodes?.length || 0
         const edgeCount = gRes.data.edge_count || gRes.data.edges?.length || 0
         addLog(`Graph data refreshed. Nodes: ${nodeCount}, Edges: ${edgeCount}`)
+        if (gRes.warning) {
+          addLog(`Warning: ${gRes.warning}`)
+        }
       }
     }
   } catch (err) {
@@ -319,8 +405,14 @@ const fetchGraphData = async () => {
 }
 
 const startPollingTask = (taskId) => {
+  if (!taskId) return
+  stopPolling()
+  activeBuildTaskId = taskId
   pollTaskStatus(taskId)
-  pollTimer = setInterval(() => pollTaskStatus(taskId), 2000)
+  pollTimer = setInterval(() => {
+    if (!activeBuildTaskId) return
+    pollTaskStatus(activeBuildTaskId)
+  }, 2000)
 }
 
 const pollTaskStatus = async (taskId) => {
@@ -356,6 +448,9 @@ const pollTaskStatus = async (taskId) => {
     }
   } catch (e) {
     console.error(e)
+    if (e?.response?.status === 404 || /not found/i.test(e?.message || '')) {
+      await recoverBuildTask(taskId)
+    }
   }
 }
 
@@ -366,7 +461,11 @@ const loadGraph = async (graphId) => {
     const res = await getGraphData(graphId)
     if (res.success) {
       graphData.value = res.data
+      error.value = ''
       addLog('Graph data loaded successfully.')
+      if (res.warning) {
+        addLog(`Warning: ${res.warning}`)
+      }
     } else {
       addLog(`Failed to load graph data: ${res.error}`)
     }
@@ -389,6 +488,7 @@ const stopPolling = () => {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  activeBuildTaskId = null
 }
 
 const stopGraphPolling = () => {

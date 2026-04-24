@@ -11,10 +11,49 @@ from dotenv import load_dotenv
 project_root_env = os.path.join(os.path.dirname(__file__), '../../.env')
 
 if os.path.exists(project_root_env):
-    load_dotenv(project_root_env, override=True)
+    # 不覆盖已经存在的环境变量，避免示例 .env 中的占位值污染真实配置
+    load_dotenv(project_root_env, override=False)
 else:
     # 如果根目录没有 .env，尝试加载环境变量（用于生产环境）
-    load_dotenv(override=True)
+    load_dotenv(override=False)
+
+
+PLACEHOLDER_ENV_VALUES = {
+    'your_api_key_here',
+    'your_zep_api_key_here',
+    'your_base_url_here',
+    'your_model_name_here',
+}
+
+
+def _normalize_env_value(value: str | None) -> str | None:
+    """将空字符串和示例占位值视为未配置。"""
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    lowered = normalized.lower()
+    if lowered in PLACEHOLDER_ENV_VALUES:
+        return None
+
+    if lowered.startswith('your_') and lowered.endswith('_here'):
+        return None
+
+    return normalized
+
+
+def _get_env(name: str, default: str | None = None) -> str | None:
+    value = _normalize_env_value(os.environ.get(name))
+    if value is not None:
+        return value
+
+    if default is None:
+        return None
+
+    return _normalize_env_value(default)
 
 
 class Config:
@@ -28,12 +67,12 @@ class Config:
     JSON_AS_ASCII = False
     
     # LLM配置（统一使用OpenAI格式）
-    LLM_API_KEY = os.environ.get('LLM_API_KEY')
-    LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
-    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
+    LLM_API_KEY = _get_env('LLM_API_KEY')
+    LLM_BASE_URL = _get_env('LLM_BASE_URL', 'https://api.openai.com/v1')
+    LLM_MODEL_NAME = _get_env('LLM_MODEL_NAME', 'gpt-4o-mini')
     
     # Zep配置
-    ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
+    ZEP_API_KEY = _get_env('ZEP_API_KEY')
     
     # 文件上传配置
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
@@ -64,12 +103,22 @@ class Config:
     REPORT_AGENT_TEMPERATURE = float(os.environ.get('REPORT_AGENT_TEMPERATURE', '0.5'))
     
     @classmethod
-    def validate(cls):
-        """验证必要配置"""
+    def validate_llm(cls):
+        """验证 LLM 配置"""
         errors = []
         if not cls.LLM_API_KEY:
             errors.append("LLM_API_KEY 未配置")
+        return errors
+
+    @classmethod
+    def validate_zep(cls):
+        """验证 Zep 配置"""
+        errors = []
         if not cls.ZEP_API_KEY:
             errors.append("ZEP_API_KEY 未配置")
         return errors
 
+    @classmethod
+    def validate(cls):
+        """验证必要配置"""
+        return cls.validate_llm() + cls.validate_zep()

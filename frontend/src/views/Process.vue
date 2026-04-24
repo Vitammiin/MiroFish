@@ -415,7 +415,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
-import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
+import { getPendingUpload, clearPendingUpload, restorePendingUpload } from '../store/pendingUpload'
 import * as d3 from 'd3'
 
 const route = useRoute()
@@ -566,7 +566,10 @@ const initProject = async () => {
 
 // 处理新建项目 - 调用 ontology/generate API
 const handleNewProject = async () => {
-  const pending = getPendingUpload()
+  let pending = getPendingUpload()
+  if (!pending.isPending || pending.files.length === 0) {
+    pending = await restorePendingUpload()
+  }
   
   if (!pending.isPending || pending.files.length === 0) {
     error.value = '没有待上传的文件，请返回首页重新操作'
@@ -591,7 +594,7 @@ const handleNewProject = async () => {
     
     if (response.success) {
       // 清除待上传数据
-      clearPendingUpload()
+      await clearPendingUpload()
       
       // 更新项目ID和数据
       currentProjectId.value = response.data.project_id
@@ -626,6 +629,7 @@ const loadProject = async () => {
     
     if (response.success) {
       projectData.value = response.data
+      error.value = ''
       updatePhaseByStatus(response.data.status)
       
       // 自动开始图谱构建
@@ -659,12 +663,15 @@ const updatePhaseByStatus = (status) => {
   switch (status) {
     case 'created':
     case 'ontology_generated':
+      error.value = ''
       currentPhase.value = 0
       break
     case 'graph_building':
+      error.value = ''
       currentPhase.value = 1
       break
     case 'graph_completed':
+      error.value = ''
       currentPhase.value = 2
       break
     case 'failed':
@@ -709,16 +716,64 @@ const startBuildGraph = async () => {
 
 // 图谱数据轮询定时器
 let graphPollTimer = null
+let activeBuildTaskId = null
+let recoverBuildTaskPromise = null
 
 // 启动图谱数据轮询
 const startGraphPolling = () => {
-  // 立即获取一次
-  fetchGraphData()
-  
-  // 每 10 秒自动获取一次图谱数据
-  graphPollTimer = setInterval(async () => {
-    await fetchGraphData()
-  }, 10000)
+  console.log('Graph data polling disabled to avoid Zep FREE plan rate limits during build')
+}
+
+const recoverBuildTask = async (staleTaskId) => {
+  if (recoverBuildTaskPromise) return recoverBuildTaskPromise
+
+  recoverBuildTaskPromise = (async () => {
+    try {
+      const projectResponse = await getProject(currentProjectId.value)
+
+      if (!projectResponse.success) return
+
+      projectData.value = projectResponse.data
+      updatePhaseByStatus(projectResponse.data.status)
+
+      if (
+        projectResponse.data.status === 'graph_building' &&
+        projectResponse.data.graph_build_task_id &&
+        projectResponse.data.graph_build_task_id !== staleTaskId
+      ) {
+        console.warn('Recovered graph build task:', staleTaskId, '->', projectResponse.data.graph_build_task_id)
+        buildProgress.value = buildProgress.value || {
+          progress: 1,
+          message: 'Восстанавливаем сборку графа после перезапуска backend...'
+        }
+        error.value = null
+        startPollingTask(projectResponse.data.graph_build_task_id)
+        return
+      }
+
+      if (projectResponse.data.status === 'graph_completed' && projectResponse.data.graph_id) {
+        stopPolling()
+        stopGraphPolling()
+        currentPhase.value = 2
+        buildProgress.value = null
+        await loadGraph(projectResponse.data.graph_id)
+        return
+      }
+
+      if (projectResponse.data.status === 'failed') {
+        stopPolling()
+        stopGraphPolling()
+        buildProgress.value = null
+        error.value = projectResponse.data.error || 'Граф build failed during recovery'
+      }
+    } catch (err) {
+      console.error('Recover build task error:', err)
+    } finally {
+      recoverBuildTaskPromise = null
+    }
+  })()
+
+  return recoverBuildTaskPromise
 }
 
 // 手动刷新图谱
@@ -755,6 +810,9 @@ const fetchGraphData = async () => {
         const oldNodeCount = graphData.value?.node_count || graphData.value?.nodes?.length || 0
         
         console.log('Fetching graph data, nodes:', newNodeCount, 'edges:', newData.edge_count || newData.edges?.length || 0)
+        if (graphResponse.warning) {
+          console.warn('Graph warning:', graphResponse.warning)
+        }
         
         // 数据有变化时更新渲染
         if (newNodeCount !== oldNodeCount || !graphData.value) {
@@ -771,12 +829,17 @@ const fetchGraphData = async () => {
 
 // 轮询任务状态
 const startPollingTask = (taskId) => {
+  if (!taskId) return
+  stopPolling()
+  activeBuildTaskId = taskId
+
   // 立即执行一次查询
   pollTaskStatus(taskId)
   
   // 然后定时轮询
   pollTimer = setInterval(() => {
-    pollTaskStatus(taskId)
+    if (!activeBuildTaskId) return
+    pollTaskStatus(activeBuildTaskId)
   }, 2000)
 }
 
@@ -833,6 +896,9 @@ const pollTaskStatus = async (taskId) => {
     }
   } catch (err) {
     console.error('Poll task error:', err)
+    if (err?.response?.status === 404 || /not found/i.test(err?.message || '')) {
+      await recoverBuildTask(taskId)
+    }
   }
 }
 
@@ -841,6 +907,7 @@ const stopPolling = () => {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  activeBuildTaskId = null
 }
 
 // 加载图谱数据
@@ -851,6 +918,10 @@ const loadGraph = async (graphId) => {
     
     if (response.success) {
       graphData.value = response.data
+      error.value = ''
+      if (response.warning) {
+        console.warn('Graph warning:', response.warning)
+      }
       await nextTick()
       renderGraph()
     }
